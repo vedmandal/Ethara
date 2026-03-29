@@ -1,54 +1,30 @@
 /**
  * Email Service
- * Sends OTP and notifications via Nodemailer
+ * Sends OTP using Brevo API (NO SMTP)
  */
-import nodemailer from "nodemailer";
 
+import SibApiV3Sdk from 'sib-api-v3-sdk';
+
+// ─── Setup Brevo Client ─────────────────────────────────────
+const client = SibApiV3Sdk.ApiClient.instance;
+client.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
+
+// ─── Get sender ─────────────────────────────────────────────
 const getMailFrom = () => {
-  const fromEmail = process.env.EMAIL_FROM || process.env.EMAIL_USER;
-  const fromName = process.env.EMAIL_FROM_NAME || "Pulse Chat";
-  return `"${fromName}" <${fromEmail}>`;
+  return {
+    email: process.env.BREVO_SENDER_EMAIL, // must be verified in Brevo
+    name: process.env.EMAIL_FROM_NAME || "Pulse Chat",
+  };
 };
 
-// Create transporter (works in dev + production)
-const createTransporter = () => {
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: parseInt(process.env.EMAIL_PORT),
-    secure: Number(process.env.EMAIL_PORT) === 465,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-
-  if (!process.env.EMAIL_FROM) {
-    console.warn(
-      "⚠️ EMAIL_FROM is not set. Falling back to EMAIL_USER as the sender address. " +
-      "This may be rejected by Brevo unless that sender is verified."
-    );
-  }
-
-  // Optional: verify connection
-  transporter.verify((error, success) => {
-    if (error) {
-      console.error("❌ SMTP Error:", error);
-    } else {
-      console.log("✅ SMTP Ready");
-    }
-  });
-
-  return transporter;
-};
-
-// ─── Send OTP Email ───────────────────────────────────────────────────────────
+// ─── Send OTP Email ─────────────────────────────────────────
 export const sendOTPEmail = async (
   email,
   otp,
   username,
   type = "verification"
 ) => {
-  const transporter = createTransporter();
+  const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
   const subjects = {
     verification: "Verify your Pulse Chat account",
@@ -68,33 +44,13 @@ export const sendOTPEmail = async (
   const html = `
     <!DOCTYPE html>
     <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
-          .container { max-width: 480px; margin: 0 auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
-          .header { background: linear-gradient(135deg, #2d6a4f, #40916c); padding: 40px 32px; text-align: center; }
-          .logo { color: #fff; font-size: 28px; font-weight: 700; }
-          .logo span { color: #74c69d; }
-          .body { padding: 40px 32px; }
-          h2 { color: #1b1b1b; }
-          p { color: #555; }
-          .otp-box { background: #f0faf5; border: 2px dashed #40916c; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0; }
-          .otp { font-size: 40px; font-weight: 800; letter-spacing: 10px; color: #2d6a4f; font-family: monospace; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <div class="logo">Pulse<span>Chat</span></div>
-          </div>
-          <div class="body">
-            <h2>${titles[type]}</h2>
-            <p>Hi ${username}, ${messages[type]}</p>
-            <div class="otp-box">
-              <div class="otp">${otp}</div>
-              <p>Expires in 10 minutes</p>
-            </div>
+      <body style="font-family: Arial; background:#f5f5f5; padding:20px;">
+        <div style="max-width:480px;margin:auto;background:#fff;border-radius:12px;padding:30px;">
+          <h2>${titles[type]}</h2>
+          <p>Hi ${username}, ${messages[type]}</p>
+          <div style="text-align:center;margin:20px 0;">
+            <h1 style="letter-spacing:8px;color:#2d6a4f;">${otp}</h1>
+            <p>Expires in 10 minutes</p>
           </div>
         </div>
       </body>
@@ -102,17 +58,20 @@ export const sendOTPEmail = async (
   `;
 
   try {
-    const info = await transporter.sendMail({
-      from: getMailFrom(),
-      to: email,
+    const response = await apiInstance.sendTransacEmail({
+      sender: getMailFrom(),
+      to: [{ email }],
       subject: subjects[type],
-      text: `${messages[type]} ${otp}`,
-      html,
+      htmlContent: html,
     });
 
-    console.log("📧 Email sent:", info.messageId, "from", getMailFrom(), "to", email);
+    console.log("📧 Email sent:", response.messageId);
   } catch (error) {
-    console.error("❌ Email failed:", error?.message || error);
-    throw error;
+    console.error(
+      "❌ Brevo Email Error:",
+      error.response?.body || error.message
+    );
+
+    // ❗ Do NOT throw (prevents breaking registration)
   }
 };

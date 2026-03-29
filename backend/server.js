@@ -46,6 +46,8 @@ const io = new Server(httpServer, {
 
 // Connect to MongoDB
 connectDB();
+// ✅ ADD THIS HERE
+app.set('trust proxy', 1);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(helmet({
